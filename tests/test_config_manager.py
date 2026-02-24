@@ -142,3 +142,48 @@ def test_ignored_nicks_no_migrate_when_name_unchanged(tmp_path):
     manager.update_server(index, updated)
 
     assert manager.get_ignored_nicks("TestNet") == ["spammer"]
+
+
+def test_server_logging_lookup_cache_updates(tmp_path):
+    manager = ConfigManager(str(tmp_path / "config.json"))
+
+    manager.add_server({
+        "name": "TestNet",
+        "host": "irc.test",
+        "port": 6667,
+        "ssl": False,
+        "channels": [],
+        "logging_enabled": False,
+    })
+
+    assert manager.is_server_logging_enabled("TestNet") is False
+
+    testnet_index = next(
+        i for i, srv in enumerate(manager.get_servers())
+        if srv.get("name") == "TestNet"
+    )
+
+    updated = dict(manager.get_servers()[testnet_index])
+    updated["logging_enabled"] = True
+    assert manager.update_server(testnet_index, updated) is True
+    assert manager.is_server_logging_enabled("TestNet") is True
+
+    assert manager.remove_server(testnet_index) is True
+    assert manager.is_server_logging_enabled("TestNet") is False
+
+
+def test_set_servers_rebuilds_logging_lookup(tmp_path):
+    manager = ConfigManager(str(tmp_path / "config.json"))
+
+    manager.set("servers", [
+        {
+            "name": "Alpha",
+            "host": "irc.alpha",
+            "port": 6667,
+            "ssl": False,
+            "channels": [],
+            "logging_enabled": True,
+        }
+    ])
+
+    assert manager.is_server_logging_enabled("Alpha") is True

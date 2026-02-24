@@ -148,3 +148,67 @@ def test_alternate_nick_not_used_when_connected():
 
     assert connection.nickname == "Primary"
     assert fake.quoted == []
+
+
+def test_private_message_target_match_is_case_insensitive(monkeypatch):
+    events = []
+
+    def on_message(server, channel, sender, message, is_mention, is_private):
+        events.append((channel, sender, message, is_mention, is_private))
+
+    connection = irc_manager.IRCConnection(
+        {
+            "name": "TestNet",
+            "host": "irc.test",
+            "nickname": "MyNick",
+            "channels": []
+        },
+        {"on_message": on_message}
+    )
+
+    fake = FakeIRC(connection.nickname)
+    connection.irc = fake
+
+    monkeypatch.setattr(
+        irc_manager.GLib,
+        "idle_add",
+        lambda func, *args, **kwargs: func(*args)
+    )
+
+    connection._register_handlers()
+    msg_handler = fake.handlers["PRIVMSG"]
+    msg_handler(fake, ["Alice"], ["mYnIcK", "hello there"])
+
+    assert events == [("Alice", "Alice", "hello there", False, True)]
+
+
+def test_mention_detection_uses_formatted_message(monkeypatch):
+    events = []
+
+    def on_message(server, channel, sender, message, is_mention, is_private):
+        events.append((message, is_mention, is_private))
+
+    connection = irc_manager.IRCConnection(
+        {
+            "name": "TestNet",
+            "host": "irc.test",
+            "nickname": "MyNick",
+            "channels": []
+        },
+        {"on_message": on_message}
+    )
+
+    fake = FakeIRC(connection.nickname)
+    connection.irc = fake
+
+    monkeypatch.setattr(
+        irc_manager.GLib,
+        "idle_add",
+        lambda func, *args, **kwargs: func(*args)
+    )
+
+    connection._register_handlers()
+    msg_handler = fake.handlers["PRIVMSG"]
+    msg_handler(fake, ["Bob"], ["#test", "hi \x02MyNick\x02"])
+
+    assert events == [("hi MyNick", True, False)]

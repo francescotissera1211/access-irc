@@ -85,6 +85,12 @@ class ConfigManager:
 
         self.config = self._load_config()
 
+        # Hot-path lookup caches used by message handlers
+        self._server_logging_enabled: Dict[str, bool] = {}
+        self._ignored_nicks_lookup: Dict[str, set] = {}
+        self._rebuild_server_logging_cache()
+        self._rebuild_ignored_nicks_cache()
+
     def _load_config(self) -> Dict[str, Any]:
         """
         Load configuration from file, creating default if doesn't exist
@@ -248,6 +254,33 @@ class ConfigManager:
 
         return merged
 
+    def _rebuild_server_logging_cache(self) -> None:
+        """Rebuild fast lookup map for per-server logging setting."""
+        lookup: Dict[str, bool] = {}
+        for server in self.config.get("servers", []):
+            name = str(server.get("name", "")).strip()
+            if not name:
+                continue
+            lookup[name] = bool(server.get("logging_enabled", False))
+        self._server_logging_enabled = lookup
+
+    def _rebuild_ignored_nicks_cache(self) -> None:
+        """Rebuild fast lookup sets for ignored nicks (stored lowercase)."""
+        lookup: Dict[str, set] = {}
+        ignored_nicks = self.config.get("ignored_nicks", {})
+        for server, nicks in ignored_nicks.items():
+            server_name = str(server).strip()
+            if not server_name:
+                continue
+            lowered = {
+                str(nick).strip().lower()
+                for nick in (nicks or [])
+                if str(nick).strip()
+            }
+            if lowered:
+                lookup[server_name] = lowered
+        self._ignored_nicks_lookup = lookup
+
     def save_config(self, config: Optional[Dict[str, Any]] = None) -> bool:
         """
         Save configuration to file atomically
@@ -317,10 +350,26 @@ class ConfigManager:
             value: Value to set
         """
         self.config[key] = value
+        if key == "servers":
+            self._rebuild_server_logging_cache()
+        elif key == "ignored_nicks":
+            self._rebuild_ignored_nicks_cache()
 
     def get_servers(self) -> List[Dict[str, Any]]:
         """Get list of configured servers"""
         return self.config.get("servers", [])
+
+    def is_server_logging_enabled(self, server_name: str) -> bool:
+        """
+        Check if logging is enabled for a specific server.
+
+        Args:
+            server_name: Server display name
+
+        Returns:
+            True when server exists and has logging enabled
+        """
+        return self._server_logging_enabled.get(server_name, False)
 
     def add_server(self, server: Dict[str, Any]) -> None:
         """
@@ -332,6 +381,7 @@ class ConfigManager:
         servers = self.config.get("servers", [])
         servers.append(server)
         self.config["servers"] = servers
+        self._rebuild_server_logging_cache()
         self.save_config()
 
     def update_server(self, index: int, server: Dict[str, Any]) -> bool:
@@ -358,6 +408,8 @@ class ConfigManager:
 
             servers[index] = server
             self.config["servers"] = servers
+            self._rebuild_server_logging_cache()
+            self._rebuild_ignored_nicks_cache()
             self.save_config()
             return True
         return False
@@ -376,6 +428,7 @@ class ConfigManager:
         if 0 <= index < len(servers):
             servers.pop(index)
             self.config["servers"] = servers
+            self._rebuild_server_logging_cache()
             self.save_config()
             return True
         return False
@@ -586,9 +639,8 @@ class ConfigManager:
         return self.config.get("ignored_nicks", {}).get(server, [])
 
     def is_nick_ignored(self, server: str, nick: str) -> bool:
-        """Check if a nick is ignored on a server (case-insensitive)"""
-        ignored = self.get_ignored_nicks(server)
-        return nick.lower() in ignored
+        """Check if a nick is ignored on a server (case-insensitive)."""
+        return nick.lower() in self._ignored_nicks_lookup.get(server, set())
 
     def add_ignored_nick(self, server: str, nick: str) -> bool:
         """
@@ -602,9 +654,13 @@ class ConfigManager:
         if server not in self.config["ignored_nicks"]:
             self.config["ignored_nicks"][server] = []
         lower_nick = nick.lower()
-        if lower_nick in self.config["ignored_nicks"][server]:
+
+        # Fast duplicate check against normalized cache
+        if lower_nick in self._ignored_nicks_lookup.get(server, set()):
             return False
+
         self.config["ignored_nicks"][server].append(lower_nick)
+        self._ignored_nicks_lookup.setdefault(server, set()).add(lower_nick)
         self.save_config()
         return True
 
@@ -617,9 +673,22 @@ class ConfigManager:
         """
         ignored = self.config.get("ignored_nicks", {}).get(server, [])
         lower_nick = nick.lower()
-        if lower_nick not in ignored:
+
+        ignored_lookup = self._ignored_nicks_lookup.get(server, set())
+        if lower_nick not in ignored_lookup:
             return False
-        ignored.remove(lower_nick)
+
+        # Remove first case-insensitive match from persisted list
+        for i, existing in enumerate(list(ignored)):
+            if str(existing).lower() == lower_nick:
+                ignored.pop(i)
+                break
+
+        if server in self._ignored_nicks_lookup:
+            self._ignored_nicks_lookup[server].discard(lower_nick)
+            if not self._ignored_nicks_lookup[server]:
+                self._ignored_nicks_lookup.pop(server, None)
+
         self.save_config()
         return True
 

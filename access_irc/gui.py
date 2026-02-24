@@ -65,7 +65,10 @@ class AccessibleIRCWindow(Gtk.Window):
         self.current_target: Optional[str] = None  # Channel or PM recipient
 
         # Message buffers for each server/channel
-        self.message_buffers: Dict[Tuple[str, str], Gtk.TextBuffer] = {}
+        self.message_buffers: Dict[Tuple[Optional[str], Optional[str]], Gtk.TextBuffer] = {}
+
+        # Track server tree iters for faster lookups
+        self.server_iters: Dict[str, Gtk.TreeIter] = {}
 
         # Track PM tree iters per server: Dict[server_name, Dict[username, TreeIter]]
         self.pm_iters: Dict[str, Dict[str, Gtk.TreeIter]] = {}
@@ -703,11 +706,7 @@ class AccessibleIRCWindow(Gtk.Window):
             is_system: Whether it's a system message
         """
         # Get or create buffer for this server/target
-        key = (server, target)
-        if key not in self.message_buffers:
-            self.message_buffers[key] = Gtk.TextBuffer()
-
-        buffer = self.message_buffers[key]
+        buffer = self._get_or_create_message_buffer(server, target)
 
         # Format message with timestamp (if enabled)
         if self.config_manager.should_show_timestamps():
@@ -731,7 +730,7 @@ class AccessibleIRCWindow(Gtk.Window):
 
         # If this is the current view, update display and scroll
         if self.current_server == server and self.current_target == target:
-            self.message_view.set_buffer(buffer)
+            self._set_message_view_buffer_if_needed(buffer)
             self._scroll_to_bottom()
 
         # Handle announcements (sounds are played in __main__.py after plugin filtering)
@@ -777,11 +776,7 @@ class AccessibleIRCWindow(Gtk.Window):
             is_mention: Whether the user is mentioned in this action
         """
         # Get or create buffer for this server/target
-        key = (server, target)
-        if key not in self.message_buffers:
-            self.message_buffers[key] = Gtk.TextBuffer()
-
-        buffer = self.message_buffers[key]
+        buffer = self._get_or_create_message_buffer(server, target)
 
         # Format action message with timestamp (if enabled)
         if self.config_manager.should_show_timestamps():
@@ -799,7 +794,7 @@ class AccessibleIRCWindow(Gtk.Window):
 
         # If this is the current view, update display and scroll
         if self.current_server == server and self.current_target == target:
-            self.message_view.set_buffer(buffer)
+            self._set_message_view_buffer_if_needed(buffer)
             self._scroll_to_bottom()
 
         # Handle mentions
@@ -807,12 +802,8 @@ class AccessibleIRCWindow(Gtk.Window):
             # Add to mentions buffer if this is a channel mention (not PM)
             if target.startswith("#"):
                 # Add action to mentions buffer
-                mentions_iter = self._get_or_create_mentions_buffer(server)
-                if mentions_iter:
-                    key = (server, "mentions")
-                    if key not in self.message_buffers:
-                        self.message_buffers[key] = Gtk.TextBuffer()
-                    mentions_buffer = self.message_buffers[key]
+                if self._get_or_create_mentions_buffer(server):
+                    mentions_buffer = self._get_or_create_message_buffer(server, "mentions")
 
                     # Format with channel prefix
                     if self.config_manager.should_show_timestamps():
@@ -829,7 +820,7 @@ class AccessibleIRCWindow(Gtk.Window):
 
                     # Update view if mentions buffer is visible
                     if self.current_server == server and self.current_target == "mentions":
-                        self.message_view.set_buffer(mentions_buffer)
+                        self._set_message_view_buffer_if_needed(mentions_buffer)
                         self._scroll_to_bottom()
 
             # Announce mention to screen reader
@@ -853,11 +844,7 @@ class AccessibleIRCWindow(Gtk.Window):
             message: Notice text
         """
         # Get or create buffer for this server/target
-        key = (server, target)
-        if key not in self.message_buffers:
-            self.message_buffers[key] = Gtk.TextBuffer()
-
-        buffer = self.message_buffers[key]
+        buffer = self._get_or_create_message_buffer(server, target)
 
         # Format notice message with timestamp (if enabled)
         if self.config_manager.should_show_timestamps():
@@ -875,7 +862,7 @@ class AccessibleIRCWindow(Gtk.Window):
 
         # If this is the current view, update display and scroll
         if self.current_server == server and self.current_target == target:
-            self.message_view.set_buffer(buffer)
+            self._set_message_view_buffer_if_needed(buffer)
             self._scroll_to_bottom()
 
         # Announce to screen reader if configured
@@ -900,11 +887,7 @@ class AccessibleIRCWindow(Gtk.Window):
             return
 
         # Get or create buffer for mentions
-        key = (server, "mentions")
-        if key not in self.message_buffers:
-            self.message_buffers[key] = Gtk.TextBuffer()
-
-        buffer = self.message_buffers[key]
+        buffer = self._get_or_create_message_buffer(server, "mentions")
 
         # Format message with timestamp and channel prefix
         if self.config_manager.should_show_timestamps():
@@ -922,7 +905,7 @@ class AccessibleIRCWindow(Gtk.Window):
 
         # If this is the current view, update display and scroll
         if self.current_server == server and self.current_target == "mentions":
-            self.message_view.set_buffer(buffer)
+            self._set_message_view_buffer_if_needed(buffer)
             self._scroll_to_bottom()
 
         # NOTE: No AT-SPI announcements or sounds here to avoid duplicates
@@ -964,6 +947,38 @@ class AccessibleIRCWindow(Gtk.Window):
         adj = self.message_scrolled.get_vadjustment()
         adj.set_value(adj.get_upper() - adj.get_page_size())
 
+    def _get_or_create_message_buffer(self, server: Optional[str], target: Optional[str]) -> Gtk.TextBuffer:
+        """Get or create the text buffer for a server/target context."""
+        key = (server, target)
+        if key not in self.message_buffers:
+            self.message_buffers[key] = Gtk.TextBuffer()
+        return self.message_buffers[key]
+
+    def _set_message_view_buffer_if_needed(self, buffer: Gtk.TextBuffer) -> None:
+        """Avoid resetting TextView buffer when it's already active."""
+        if self.message_view.get_buffer() is not buffer:
+            self.message_view.set_buffer(buffer)
+
+    def _find_server_iter(self, server_name: str) -> Optional[Gtk.TreeIter]:
+        """Find server TreeIter, using cached value when possible."""
+        cached = self.server_iters.get(server_name)
+        if cached:
+            try:
+                if self.tree_store.get_value(cached, 0) == server_name:
+                    return cached
+            except Exception:
+                pass
+
+        iter = self.tree_store.get_iter_first()
+        while iter:
+            if self.tree_store.get_value(iter, 0) == server_name:
+                self.server_iters[server_name] = iter
+                return iter
+            iter = self.tree_store.iter_next(iter)
+
+        self.server_iters.pop(server_name, None)
+        return None
+
     def add_server_to_tree(self, server_name: str) -> Gtk.TreeIter:
         """
         Add server to tree view
@@ -974,7 +989,9 @@ class AccessibleIRCWindow(Gtk.Window):
         Returns:
             TreeIter for the server
         """
-        return self.tree_store.append(None, [server_name, f"server:{server_name}"])
+        server_iter = self.tree_store.append(None, [server_name, f"server:{server_name}"])
+        self.server_iters[server_name] = server_iter
+        return server_iter
 
     def add_channel_to_tree(self, server_iter: Gtk.TreeIter, channel: str) -> Gtk.TreeIter:
         """
@@ -1007,33 +1024,31 @@ class AccessibleIRCWindow(Gtk.Window):
             server_name: Name of server
             channel: Channel name to remove
         """
-        # Find the server node
-        iter = self.tree_store.get_iter_first()
-        while iter:
-            if self.tree_store.get_value(iter, 0) == server_name:
-                # Found server, now find channel among its children
-                child_iter = self.tree_store.iter_children(iter)
-                while child_iter:
-                    identifier = self.tree_store.get_value(child_iter, 1)
-                    if identifier == f"channel:{server_name}:{channel}":
-                        # If we're viewing this channel, navigate to previous buffer
-                        if self.current_server == server_name and self.current_target == channel:
-                            closed_identifier = f"channel:{server_name}:{channel}"
+        server_iter = self._find_server_iter(server_name)
+        if not server_iter:
+            return
 
-                            # Get identifier of previous buffer BEFORE removal
-                            prev_identifier = self._get_previous_buffer_identifier(server_name, closed_identifier)
+        # Find channel among server's children
+        child_iter = self.tree_store.iter_children(server_iter)
+        while child_iter:
+            identifier = self.tree_store.get_value(child_iter, 1)
+            if identifier == f"channel:{server_name}:{channel}":
+                # If we're viewing this channel, navigate to previous buffer
+                if self.current_server == server_name and self.current_target == channel:
+                    closed_identifier = f"channel:{server_name}:{channel}"
 
-                            # Remove the channel from tree
-                            self.tree_store.remove(child_iter)
+                    # Get identifier of previous buffer BEFORE removal
+                    prev_identifier = self._get_previous_buffer_identifier(server_name, closed_identifier)
 
-                            # Navigate to previous buffer by identifier
-                            self._navigate_to_identifier(prev_identifier)
-                        else:
-                            self.tree_store.remove(child_iter)
-                        return
-                    child_iter = self.tree_store.iter_next(child_iter)
+                    # Remove the channel from tree
+                    self.tree_store.remove(child_iter)
+
+                    # Navigate to previous buffer by identifier
+                    self._navigate_to_identifier(prev_identifier)
+                else:
+                    self.tree_store.remove(child_iter)
                 return
-            iter = self.tree_store.iter_next(iter)
+            child_iter = self.tree_store.iter_next(child_iter)
 
     def remove_server_from_tree(self, server_name: str) -> None:
         """
@@ -1042,25 +1057,26 @@ class AccessibleIRCWindow(Gtk.Window):
         Args:
             server_name: Name of server to remove
         """
-        iter = self.tree_store.get_iter_first()
-        while iter:
-            if self.tree_store.get_value(iter, 0) == server_name:
-                self.tree_store.remove(iter)
-                # Clean up PM tracking for this server
-                if server_name in self.pm_iters:
-                    del self.pm_iters[server_name]
-                if server_name in self.pm_folder_iters:
-                    del self.pm_folder_iters[server_name]
-                # Clean up mentions tracking for this server
-                if server_name in self.mentions_iters:
-                    del self.mentions_iters[server_name]
-                # Reset title if we were viewing this server
-                if self.current_server == server_name:
-                    self.current_server = None
-                    self.current_target = None
-                    self._update_window_title()
-                break
-            iter = self.tree_store.iter_next(iter)
+        server_iter = self._find_server_iter(server_name)
+        if not server_iter:
+            return
+
+        self.tree_store.remove(server_iter)
+        self.server_iters.pop(server_name, None)
+
+        # Clean up PM tracking for this server
+        if server_name in self.pm_iters:
+            del self.pm_iters[server_name]
+        if server_name in self.pm_folder_iters:
+            del self.pm_folder_iters[server_name]
+        # Clean up mentions tracking for this server
+        if server_name in self.mentions_iters:
+            del self.mentions_iters[server_name]
+        # Reset title if we were viewing this server
+        if self.current_server == server_name:
+            self.current_server = None
+            self.current_target = None
+            self._update_window_title()
 
     def _get_or_create_pm_folder(self, server_name: str) -> Gtk.TreeIter:
         """
@@ -1076,15 +1092,7 @@ class AccessibleIRCWindow(Gtk.Window):
         if server_name in self.pm_folder_iters:
             return self.pm_folder_iters[server_name]
 
-        # Find the server's tree iter
-        server_iter = None
-        iter = self.tree_store.get_iter_first()
-        while iter:
-            if self.tree_store.get_value(iter, 0) == server_name:
-                server_iter = iter
-                break
-            iter = self.tree_store.iter_next(iter)
-
+        server_iter = self._find_server_iter(server_name)
         if not server_iter:
             return None
 
@@ -1115,15 +1123,7 @@ class AccessibleIRCWindow(Gtk.Window):
         if server_name in self.mentions_iters:
             return self.mentions_iters[server_name]
 
-        # Find the server's tree iter
-        server_iter = None
-        iter = self.tree_store.get_iter_first()
-        while iter:
-            if self.tree_store.get_value(iter, 0) == server_name:
-                server_iter = iter
-                break
-            iter = self.tree_store.iter_next(iter)
-
+        server_iter = self._find_server_iter(server_name)
         if not server_iter:
             return None
 
@@ -1250,13 +1250,8 @@ class AccessibleIRCWindow(Gtk.Window):
                 self.channel_label.set_text(f"{server_name} / Mentions")
 
             # Load message buffer for this context
-            key = (self.current_server, self.current_target)
-            if key in self.message_buffers:
-                self.message_view.set_buffer(self.message_buffers[key])
-            else:
-                # Create new buffer
-                self.message_buffers[key] = Gtk.TextBuffer()
-                self.message_view.set_buffer(self.message_buffers[key])
+            buffer = self._get_or_create_message_buffer(self.current_server, self.current_target)
+            self._set_message_view_buffer_if_needed(buffer)
 
             # Update users list for the selected channel
             self.update_users_list()
@@ -2453,10 +2448,8 @@ class AccessibleIRCWindow(Gtk.Window):
             self.channel_label.set_text(f"{self.current_server} / PM: {username}")
 
             # Create buffer if needed
-            key = (self.current_server, username)
-            if key not in self.message_buffers:
-                self.message_buffers[key] = Gtk.TextBuffer()
-            self.message_view.set_buffer(self.message_buffers[key])
+            buffer = self._get_or_create_message_buffer(self.current_server, username)
+            self._set_message_view_buffer_if_needed(buffer)
 
             # Clear users list (PMs don't have user lists)
             for child in self.users_list.get_children():

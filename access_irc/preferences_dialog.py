@@ -620,11 +620,8 @@ class PreferencesDialog(Gtk.Dialog):
 
                 # Filter to only include servers with logging enabled
                 for server_name in connected_server_names:
-                    for server_config in self.config.get_servers():
-                        if server_config.get("name") == server_name:
-                            if server_config.get("logging_enabled", False):
-                                connected_servers.append(server_name)
-                            break
+                    if self.config.is_server_logging_enabled(server_name):
+                        connected_servers.append(server_name)
 
             # Update log directory and create server directories
             try:

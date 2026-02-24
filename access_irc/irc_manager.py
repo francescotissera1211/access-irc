@@ -20,6 +20,11 @@ except ImportError:
     print("Warning: miniirc not available. Please install with: pip install miniirc")
 
 
+# Precompiled IRC formatting helpers (hot path for incoming messages)
+IRC_COLOR_RE = re.compile(r'\x03(?:\d{1,2}(?:,\d{1,2})?)?')
+IRC_FORMAT_TRANSLATION = str.maketrans('', '', '\x02\x1D\x1F\x16\x0F')
+
+
 def strip_irc_formatting(text: str) -> str:
     """
     Strip IRC formatting codes from text
@@ -39,18 +44,10 @@ def strip_irc_formatting(text: str) -> str:
     Returns:
         Text with formatting codes removed
     """
-    # Remove color codes: \x03 followed by optional foreground and background
-    # Format: \x03[0-9]{1,2}(?:,[0-9]{1,2})?
-    text = re.sub(r'\x03(?:\d{1,2}(?:,\d{1,2})?)?', '', text)
-
-    # Remove other formatting codes
-    text = text.replace('\x02', '')  # Bold
-    text = text.replace('\x1D', '')  # Italic
-    text = text.replace('\x1F', '')  # Underline
-    text = text.replace('\x16', '')  # Reverse
-    text = text.replace('\x0F', '')  # Reset
-
-    return text
+    # Remove color codes first, then strip remaining inline formatting bytes.
+    # This path is called for most incoming messages, so avoid repeated regex
+    # recompilation and chained str.replace allocations.
+    return IRC_COLOR_RE.sub('', text).translate(IRC_FORMAT_TRANSLATION)
 
 
 class IRCConnection:
@@ -89,6 +86,7 @@ class IRCConnection:
         self.verify_ssl = server_config.get("verify_ssl", True)
         self.channels = server_config.get("channels", [])
         self.nickname = server_config.get("nickname", "IRCUser")
+        self._nickname_lower = self.nickname.lower()
         self.base_nickname = self.nickname
         self.alternate_nicks = self._normalize_alternate_nicks(
             server_config.get("alternate_nicks", [])
@@ -144,6 +142,19 @@ class IRCConnection:
                 self.server_name,
                 message
             )
+
+    def _set_active_nickname(self, nickname: str) -> None:
+        """Update nickname and cached lowercase variant used on hot paths."""
+        self.nickname = nickname
+        self._nickname_lower = nickname.lower()
+
+    def _target_is_self(self, target: str) -> bool:
+        """Case-insensitive check for whether a target addresses this client."""
+        return bool(target) and target.lower() == self._nickname_lower
+
+    def _is_mention(self, text: str) -> bool:
+        """Fast case-insensitive substring match for current nickname."""
+        return bool(self._nickname_lower) and self._nickname_lower in text.lower()
 
     def connect(self) -> bool:
         """
@@ -277,7 +288,7 @@ class IRCConnection:
         def on_connect(irc, hostmask, args):
             """Handle successful connection"""
             if args:
-                self.nickname = args[0]
+                self._set_active_nickname(args[0])
             self.connected = True
             self._run_auto_connect_commands()
             GLib.idle_add(self._call_callback, "on_connect", self.server_name)
@@ -290,7 +301,7 @@ class IRCConnection:
             message = args[-1]
 
             # Check if it's a private message or channel message
-            is_private = target == self.nickname
+            is_private = self._target_is_self(target)
             # For PMs, use the sender's nickname as the target so we can track conversations
             channel = sender if is_private else target
 
@@ -316,8 +327,7 @@ class IRCConnection:
                     action = ctcp_content[7:]  # Remove 'ACTION '
                     # Strip IRC formatting codes from action
                     clean_action = strip_irc_formatting(action)
-                    # Check if nickname is mentioned in the action (check both original and clean)
-                    is_mention = self.nickname.lower() in action.lower() or self.nickname.lower() in clean_action.lower()
+                    is_mention = self._is_mention(clean_action)
                     # Call on_action callback
                     GLib.idle_add(
                         self._call_callback,
@@ -336,8 +346,7 @@ class IRCConnection:
                 # Regular message
                 # Strip IRC formatting codes from message
                 clean_message = strip_irc_formatting(message)
-                # Check if nickname is mentioned (check both original and clean for safety)
-                is_mention = self.nickname.lower() in message.lower() or self.nickname.lower() in clean_message.lower()
+                is_mention = self._is_mention(clean_message)
 
                 # Use GLib.idle_add to call callback in GTK main thread
                 GLib.idle_add(
@@ -431,7 +440,7 @@ class IRCConnection:
 
             # Track our own nick changes
             if old_nick == self.nickname:
-                self.nickname = new_nick
+                self._set_active_nickname(new_nick)
 
             # Rename user in all channels
             self.rename_user(old_nick, new_nick)
@@ -524,7 +533,7 @@ class IRCConnection:
             message = args[-1]
 
             # Check if it's a private notice or channel notice
-            is_private = target == self.nickname
+            is_private = self._target_is_self(target)
             # For private notices, use the server name as the target (routes to server buffer)
             # This prevents opening PM windows for every notice
             channel = self.server_name if is_private else target
@@ -991,7 +1000,7 @@ class IRCConnection:
         while self._alternate_nick_index < len(self.alternate_nicks):
             candidate = self.alternate_nicks[self._alternate_nick_index]
             self._alternate_nick_index += 1
-            if candidate and candidate.lower() != self.nickname.lower():
+            if candidate and candidate.lower() != self._nickname_lower:
                 return candidate
         return None
 
@@ -1009,7 +1018,7 @@ class IRCConnection:
         if auto_retry:
             next_nick = self._next_alternate_nick()
             if next_nick and self.irc:
-                self.nickname = next_nick
+                self._set_active_nickname(next_nick)
                 self.irc._desired_nick = next_nick
                 if self.alternate_nicks:
                     self.irc._current_nick = f"0{next_nick}"

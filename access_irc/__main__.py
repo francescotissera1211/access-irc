@@ -194,13 +194,7 @@ class AccessIRCApplication:
         if not self.config.get_log_directory():
             return False
 
-        # Check if server has logging enabled
-        servers = self.config.get_servers()
-        for server in servers:
-            if server.get("name") == server_name:
-                return server.get("logging_enabled", False)
-
-        return False
+        return self.config.is_server_logging_enabled(server_name)
 
     # IRC event callbacks
     def on_irc_connect(self, server_name: str) -> None:
