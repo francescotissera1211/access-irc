@@ -712,9 +712,9 @@ class AccessibleIRCWindow(Gtk.Window):
         if self.config_manager.should_show_timestamps():
             timestamp = datetime.now().strftime("%H:%M:%S")
             if is_system:
-                formatted = f"[{timestamp}] * {message}\n"
+                formatted = f"* {message} [{timestamp}]\n"
             else:
-                formatted = f"[{timestamp}] <{sender}> {message}\n"
+                formatted = f"<{sender}> {message} [{timestamp}]\n"
         else:
             if is_system:
                 formatted = f"* {message}\n"
@@ -781,7 +781,7 @@ class AccessibleIRCWindow(Gtk.Window):
         # Format action message with timestamp (if enabled)
         if self.config_manager.should_show_timestamps():
             timestamp = datetime.now().strftime("%H:%M:%S")
-            formatted = f"[{timestamp}] * {sender} {action}\n"
+            formatted = f"* {sender} {action} [{timestamp}]\n"
         else:
             formatted = f"* {sender} {action}\n"
 
@@ -808,7 +808,7 @@ class AccessibleIRCWindow(Gtk.Window):
                     # Format with channel prefix
                     if self.config_manager.should_show_timestamps():
                         timestamp = datetime.now().strftime("%H:%M:%S")
-                        mentions_formatted = f"[{timestamp}] {target}: * {sender} {action}\n"
+                        mentions_formatted = f"{target}: * {sender} {action} [{timestamp}]\n"
                     else:
                         mentions_formatted = f"{target}: * {sender} {action}\n"
 
@@ -849,7 +849,7 @@ class AccessibleIRCWindow(Gtk.Window):
         # Format notice message with timestamp (if enabled)
         if self.config_manager.should_show_timestamps():
             timestamp = datetime.now().strftime("%H:%M:%S")
-            formatted = f"[{timestamp}] -{sender}- {message}\n"
+            formatted = f"-{sender}- {message} [{timestamp}]\n"
         else:
             formatted = f"-{sender}- {message}\n"
 
@@ -892,7 +892,7 @@ class AccessibleIRCWindow(Gtk.Window):
         # Format message with timestamp and channel prefix
         if self.config_manager.should_show_timestamps():
             timestamp = datetime.now().strftime("%H:%M:%S")
-            formatted = f"[{timestamp}] {channel}: <{sender}> {message}\n"
+            formatted = f"{channel}: <{sender}> {message} [{timestamp}]\n"
         else:
             formatted = f"{channel}: <{sender}> {message}\n"
 

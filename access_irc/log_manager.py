@@ -173,7 +173,7 @@ class LogManager:
             message: Message text
         """
         timestamp = datetime.now().strftime("[%H:%M:%S]")
-        line = f"{timestamp} <{sender}> {message}"
+        line = f"<{sender}> {message} {timestamp}"
         self._write_to_log(server, target, line)
 
     def log_action(self, server: str, target: str, sender: str, action: str) -> None:
@@ -187,7 +187,7 @@ class LogManager:
             action: Action text
         """
         timestamp = datetime.now().strftime("[%H:%M:%S]")
-        line = f"{timestamp} * {sender} {action}"
+        line = f"* {sender} {action} {timestamp}"
         self._write_to_log(server, target, line)
 
     def log_notice(self, server: str, target: str, sender: str, message: str) -> None:
@@ -201,7 +201,7 @@ class LogManager:
             message: Notice text
         """
         timestamp = datetime.now().strftime("[%H:%M:%S]")
-        line = f"{timestamp} -{sender}- {message}"
+        line = f"-{sender}- {message} {timestamp}"
         self._write_to_log(server, target, line)
 
     def log_join(self, server: str, channel: str, nick: str) -> None:
@@ -214,7 +214,7 @@ class LogManager:
             nick: User nickname
         """
         timestamp = datetime.now().strftime("[%H:%M:%S]")
-        line = f"{timestamp} --> {nick} has joined {channel}"
+        line = f"--> {nick} has joined {channel} {timestamp}"
         self._write_to_log(server, channel, line)
 
     def log_part(self, server: str, channel: str, nick: str, reason: str = "") -> None:
@@ -229,9 +229,9 @@ class LogManager:
         """
         timestamp = datetime.now().strftime("[%H:%M:%S]")
         if reason:
-            line = f"{timestamp} <-- {nick} has left {channel} ({reason})"
+            line = f"<-- {nick} has left {channel} ({reason}) {timestamp}"
         else:
-            line = f"{timestamp} <-- {nick} has left {channel}"
+            line = f"<-- {nick} has left {channel} {timestamp}"
         self._write_to_log(server, channel, line)
 
     def log_quit(self, server: str, channel: str, nick: str, reason: str = "") -> None:
@@ -246,9 +246,9 @@ class LogManager:
         """
         timestamp = datetime.now().strftime("[%H:%M:%S]")
         if reason:
-            line = f"{timestamp} <-- {nick} has quit ({reason})"
+            line = f"<-- {nick} has quit ({reason}) {timestamp}"
         else:
-            line = f"{timestamp} <-- {nick} has quit"
+            line = f"<-- {nick} has quit {timestamp}"
         self._write_to_log(server, channel, line)
 
     def log_nick(self, server: str, channel: str, old_nick: str, new_nick: str) -> None:
@@ -262,7 +262,7 @@ class LogManager:
             new_nick: New nickname
         """
         timestamp = datetime.now().strftime("[%H:%M:%S]")
-        line = f"{timestamp} --- {old_nick} is now known as {new_nick}"
+        line = f"--- {old_nick} is now known as {new_nick} {timestamp}"
         self._write_to_log(server, channel, line)
 
     def log_kick(self, server: str, channel: str, kicker: str, kicked: str, reason: str = "") -> None:
@@ -278,9 +278,9 @@ class LogManager:
         """
         timestamp = datetime.now().strftime("[%H:%M:%S]")
         if reason:
-            line = f"{timestamp} <-! {kicked} was kicked by {kicker} ({reason})"
+            line = f"<-! {kicked} was kicked by {kicker} ({reason}) {timestamp}"
         else:
-            line = f"{timestamp} <-! {kicked} was kicked by {kicker}"
+            line = f"<-! {kicked} was kicked by {kicker} {timestamp}"
         self._write_to_log(server, channel, line)
 
     def log_system(self, server: str, target: str, message: str) -> None:
@@ -293,5 +293,5 @@ class LogManager:
             message: System message
         """
         timestamp = datetime.now().strftime("[%H:%M:%S]")
-        line = f"{timestamp} * {message}"
+        line = f"* {message} {timestamp}"
         self._write_to_log(server, target, line)

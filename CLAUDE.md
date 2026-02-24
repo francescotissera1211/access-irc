@@ -555,10 +555,10 @@ The application supports IRC bouncers with the following features:
 ### IRC Message Types and Commands
 
 **Message Display Formats**:
-- Regular messages: `[timestamp] <sender> message`
-- CTCP ACTION (/me): `[timestamp] * sender action`
-- NOTICE messages: `[timestamp] -sender- message`
-- System messages: `[timestamp] * message`
+- Regular messages: `<sender> message [timestamp]`
+- CTCP ACTION (/me): `* sender action [timestamp]`
+- NOTICE messages: `-sender- message [timestamp]`
+- System messages: `* message [timestamp]`
 
 **Supported IRC Commands** (in `access_irc/gui.py:_handle_command()`):
 - `/join #channel [key]` - Join a channel (with optional key)
@@ -730,7 +730,7 @@ When adding logging for a new IRC event type:
    ```python
    def log_new_event(self, server: str, target: str, arg1: str, arg2: str) -> None:
        timestamp = datetime.now().strftime("[%H:%M:%S]")
-       line = f"{timestamp} [format your log line here]"
+       line = f"[format your log line here] {timestamp}"
        self._write_to_log(server, target, line)
    ```
 

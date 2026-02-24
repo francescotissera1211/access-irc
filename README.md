@@ -182,11 +182,11 @@ log_directory/
 │   └── nickname-2025-11-29.log
 ```
 
-Each log file contains timestamped messages:
+Each log file contains timestamped messages (timestamp suffix for better screen-reader flow):
 ```
-[14:32:15] <alice> Hello everyone!
-[14:32:20] * bob waves
-[14:33:01] --> charlie has joined #channel
+<alice> Hello everyone! [14:32:15]
+* bob waves [14:32:20]
+--> charlie has joined #channel [14:33:01]
 ```
 
 Logs are automatically rotated daily (new file each day) and organized by server and channel.

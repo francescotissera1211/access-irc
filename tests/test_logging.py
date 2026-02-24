@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -25,7 +26,9 @@ def test_log_write_creates_sanitized_paths(tmp_path):
     assert log_file.name.endswith(f"-{date_str}.log")
 
     contents = log_file.read_text(encoding="utf-8")
-    assert "<alice> hello" in contents
+    line = contents.strip().splitlines()[-1]
+    assert line.startswith("<alice> hello ")
+    assert re.search(r"\[\d{2}:\d{2}:\d{2}\]$", line)
 
 
 def test_sanitize_name_handles_empty():
@@ -39,3 +42,19 @@ def test_logging_disabled_no_file(tmp_path):
     manager = LogManager(None)
     manager.log_message("Server", "#chan", "alice", "hello")
     assert not log_dir.exists()
+
+
+def test_log_action_and_system_timestamp_suffix(tmp_path):
+    log_dir = tmp_path / "logs"
+    manager = LogManager(str(log_dir))
+
+    manager.log_action("Server", "#chan", "alice", "waves")
+    manager.log_system("Server", "#chan", "connected")
+
+    log_file = next((log_dir / "Server").iterdir())
+    lines = [line for line in log_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+    assert lines[0].startswith("* alice waves ")
+    assert lines[1].startswith("* connected ")
+    assert re.search(r"\[\d{2}:\d{2}:\d{2}\]$", lines[0])
+    assert re.search(r"\[\d{2}:\d{2}:\d{2}\]$", lines[1])
